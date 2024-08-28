@@ -1,0 +1,468 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <!-- Using AIA integration.pom as the parent pom -->
+    <parent>
+        <groupId>com.ericsson.aia</groupId>
+        <artifactId>integration</artifactId>
+        <version>1.0.34</version>
+    </parent>
+
+    <!-- application/flow defintion-->
+    <groupId>com.ericsson.aia.bps.beam.flow</groupId>
+    <artifactId>pbaName</artifactId>
+    <version>pbaVersion</version>
+    <description>pbaDescription</description>
+
+    <properties>
+        <!--beam version, used for most of the beam dependencies-->
+        <beam.version>2.4.0</beam.version>
+
+        <!-- beam DSL xml dependencies -->
+        <beam.dsl.version>2.3.0-SNAPSHOT</beam.dsl.version>
+
+        <!-- runner version-->
+        <spark.version>2.3.0</spark.version>
+        <gearpump.version>0.8.4</gearpump.version>
+
+
+        <!-- 3PP version-->
+        <scala.version>2.11</scala.version>
+        <jackson.version>2.8.9</jackson.version>
+
+        <!--maven plugin version-->
+        <maven-compiler-plugin.version>3.6.1</maven-compiler-plugin.version>
+        <maven-exec-plugin.version>1.4.0</maven-exec-plugin.version>
+        <maven-jar-plugin.version>3.0.2</maven-jar-plugin.version>
+        <maven-shade-plugin.version>3.0.0</maven-shade-plugin.version>
+        <surefire-plugin.version>2.20</surefire-plugin.version>
+
+        <!-- Required properties when using AIA integration
+             pom configuration for building docker images.
+             Their should not be any reason to change these. -->
+        <docker.resource.phase>generate-resources</docker.resource.phase>
+        <docker.create.phase>package</docker.create.phase>
+        <docker.push.phase>deploy</docker.push.phase>
+
+        <!-- These properties are used to build the docker image -->
+
+        <!-- flow name -->
+        <flow.name>${project.artifactId}</flow.name>
+
+        <!-- runner name, used to distinguish between each runner-->
+        <runner.name>direct</runner.name>
+
+        <!-- final docker image name including the path etc-->
+        <docker.image.name>bps/beam/flow/${flow.name}-${runner.name}</docker.image.name>
+
+        <!-- override the docker.folder from parent integration pom -->
+        <!-- default docker.folder is direct folder-->
+        <docker.origin.folder>${project.basedir}/docker/direct</docker.origin.folder>
+        <docker.folder>${project.build.directory}</docker.folder>
+
+        <!-- bundle jar file final name -->
+        <bundle.jar.name>${project.artifactId}-bundled</bundle.jar.name>
+    </properties>
+
+    <build>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>${maven-compiler-plugin.version}</version>
+                <configuration>
+                    <source>1.8</source>
+                    <target>1.8</target>
+                </configuration>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>${surefire-plugin.version}</version>
+                <configuration>
+                    <parallel>all</parallel>
+                    <threadCount>4</threadCount>
+                    <redirectTestOutputToFile>true</redirectTestOutputToFile>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.apache.maven.surefire</groupId>
+                        <artifactId>surefire-junit47</artifactId>
+                        <version>${surefire-plugin.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+
+            <!-- Ensure that the Maven jar plugin runs before the Maven
+              shade plugin by listing the plugin higher within the file. -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <version>${maven-jar-plugin.version}</version>
+            </plugin>
+
+            <!--
+              Configures `mvn package` to produce a bundled jar ("fat jar") for runners
+              that require this for job submission to a cluster.
+            -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <version>${maven-shade-plugin.version}</version>
+                <executions>
+                    <execution>
+                        <phase>package</phase>
+                        <goals>
+                            <goal>shade</goal>
+                        </goals>
+                        <configuration>
+                            <finalName>${bundle.jar.name}</finalName>
+                            <filters>
+                                <filter>
+                                    <artifact>*:*</artifact>
+                                    <excludes>
+                                        <exclude>META-INF/LICENSE</exclude>
+                                        <exclude>META-INF/*.SF</exclude>
+                                        <exclude>META-INF/*.DSA</exclude>
+                                        <exclude>META-INF/*.RSA</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
+                            <transformers>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                                    <manifestEntries>
+                                        <Main-Class>org.apache.beam.sdk.extensions.dsls.xml.flow.loader.BeamFlowDSLRunner</Main-Class>
+                                        <Build-Number>1</Build-Number>
+                                    </manifestEntries>
+                                </transformer>
+                                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.AppendingTransformer">
+                                    <resource>reference.conf</resource>
+                                </transformer>
+                                <transformer
+                                        implementation="org.apache.maven.plugins.shade.resource.DontIncludeResourceTransformer">
+                                    <resource>log4j.properties</resource>
+                                </transformer>
+                            </transformers>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <artifactId>maven-resources-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>prepare-dockerfile</id>
+                        <phase>${docker.resource.phase}</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${docker.folder}</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>${docker.origin.folder}</directory>
+                                    <filtering>true</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.spotify</groupId>
+                <artifactId>docker-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>create-image</id>
+                        <phase>${docker.create.phase}</phase>
+                        <goals>
+                            <goal>build</goal>
+                        </goals>
+                    </execution>
+                    <execution>
+                        <id>push-image</id>
+                        <phase>${docker.push.phase}</phase>
+                        <goals>
+                            <goal>push</goal>
+                        </goals>
+                    </execution>
+                </executions>
+                <configuration>
+                    <imageName>
+                        ${docker.registry}/${docker.repository}/${docker.image.name}
+                    </imageName>
+                    <dockerDirectory>${docker.folder}</dockerDirectory>
+                    <imageTags>
+                        <imageTag>${project.version}</imageTag>
+                        <imageTag>latest</imageTag>
+                    </imageTags>
+                    <useConfigFile>true</useConfigFile>
+                </configuration>
+            </plugin>
+        </plugins>
+    </build>
+
+    <profiles>
+
+        <!--
+      The direct runner is available by default.
+      You can also include it on the classpath explicitly with -P direct-runner
+    -->
+        <profile>
+            <id>direct-runner</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-direct-java</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>apex-runner</id>
+            <properties>
+                <runner.name>apex</runner.name>
+                <docker.origin.folder>${project.basedir}/docker/direct</docker.origin.folder>
+            </properties>
+            <!-- Makes the ApexRunner available when running a pipeline. -->
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-apex</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>javax.servlet</groupId>
+                            <artifactId>servlet-api</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+                <!--
+                  Apex depends on httpclient version 4.3.5, project has a transitive dependency to httpclient 4.0.1 from
+                  google-http-client. Apex dependency version being specified explicitly so that it gets picked up. This
+                  can be removed when the project no longer has a dependency on a different httpclient version.
+                -->
+                <dependency>
+                    <groupId>org.apache.httpcomponents</groupId>
+                    <artifactId>httpclient</artifactId>
+                    <version>4.3.5</version>
+                    <scope>runtime</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>commons-codec</groupId>
+                            <artifactId>commons-codec</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-client</artifactId>
+                    <version>2.7.3</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                    <version>2.7.3</version>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-mapreduce-client-core</artifactId>
+                    <version>2.7.3</version>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>dataflow-runner</id>
+            <properties>
+                <runner.name>dataflow</runner.name>
+                <docker.origin.folder>${project.basedir}/docker/direct</docker.origin.folder>
+            </properties>
+            <!-- Makes the DataflowRunner available when running a pipeline. -->
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-google-cloud-dataflow-java</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>flink-runner</id>
+            <properties>
+                <runner.name>flink</runner.name>
+                <docker.origin.folder>${project.basedir}/docker/flink</docker.origin.folder>
+            </properties>
+            <!-- Makes the FlinkRunner available when running a pipeline. -->
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-flink_${scala.version}</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>javax.servlet</groupId>
+                            <artifactId>servlet-api</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>spark-runner</id>
+            <properties>
+                <runner.name>spark</runner.name>
+                <docker.origin.folder>${project.basedir}/docker/spark</docker.origin.folder>
+            </properties>
+            <!-- Makes the SparkRunner available when running a pipeline. Additionally,
+                 overrides some Spark dependencies to Beam-compatible versions. -->
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-spark</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-sdks-java-io-hadoop-file-system</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-streaming_2.11</artifactId>
+                    <version>${spark.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+                <dependency>
+                    <groupId>org.apache.spark</groupId>
+                    <artifactId>spark-core_2.11</artifactId>
+                    <version>${spark.version}</version>
+                    <scope>runtime</scope>
+                    <exclusions>
+                        <exclusion>
+                            <groupId>org.slf4j</groupId>
+                            <artifactId>jul-to-slf4j</artifactId>
+                        </exclusion>
+                    </exclusions>
+                </dependency>
+            </dependencies>
+        </profile>
+
+        <profile>
+            <id>gearpump-runner</id>
+            <properties>
+                <runner.name>gearpump</runner.name>
+                <docker.origin.folder>${project.basedir}/docker/direct</docker.origin.folder>
+            </properties>
+            <!-- Makes the FlinkRunner available when running a pipeline. -->
+            <dependencies>
+                <dependency>
+                    <groupId>org.apache.beam</groupId>
+                    <artifactId>beam-runners-gearpump</artifactId>
+                    <version>${beam.version}</version>
+                    <scope>runtime</scope>
+                </dependency>
+
+                <dependency>
+                    <groupId>org.apache.gearpump</groupId>
+                    <artifactId>gearpump-streaming_2.11</artifactId>
+                    <version>${gearpump.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+
+                <dependency>
+                    <groupId>org.apache.gearpump</groupId>
+                    <artifactId>gearpump-core_2.11</artifactId>
+                    <version>${gearpump.version}</version>
+                    <scope>provided</scope>
+                </dependency>
+
+            </dependencies>
+        </profile>
+    </profiles>
+
+    <dependencies>
+        <!-- Adds a dependency on the Beam SDK. -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-core</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+
+        <!-- common used IO -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-io-kafka</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-io-jdbc</artifactId>
+            <version>${beam.version}</version>
+        </dependency>
+
+        <!-- dependencies required for the IO-->
+        <dependency>
+            <groupId>org.apache.kafka</groupId>
+            <artifactId>kafka-clients</artifactId>
+            <version>0.10.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>kafka-json-serializer</artifactId>
+            <version>3.2.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>common-config</artifactId>
+            <version>3.2.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.confluent</groupId>
+            <artifactId>common-utils</artifactId>
+            <version>3.2.0</version>
+        </dependency>
+
+        <!-- beam dsl xml dependencies-->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-sdks-java-extensions-dsl-xml</artifactId>
+            <version>${beam.dsl.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jvnet.jaxb2_commons</groupId>
+            <artifactId>jaxb2-basics-runtime</artifactId>
+            <version>0.6.5</version>
+        </dependency>
+
+        <!-- Test dependencies -->
+        <!--
+          For testing the example itself, use the direct runner. This is separate from
+          the use of ValidatesRunner tests for testing a particular runner.
+        -->
+        <dependency>
+            <groupId>org.apache.beam</groupId>
+            <artifactId>beam-runners-direct-java</artifactId>
+            <scope>test</scope>
+            <version>${beam.version}</version>
+        </dependency>
+    </dependencies>
+
+
+</project>

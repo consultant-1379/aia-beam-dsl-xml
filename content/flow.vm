@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<FlowDefinition xmlns="http://beam.apache.org/beamflow">
+
+    <inputs>
+        #foreach ($adatper in $ipAdatperlist)
+        #set( $completeUri = $adatper.uri.protocol + $adatper.uri.address)
+        #if($adatper.uri.args) #set( $completeUri = $completeUri + "?") #end
+        #foreach($uriArg in ${adatper.uri.args}) #set( $completeUri = $completeUri + $uriArg.getKey()+"="+$uriArg.getValue()) #if( $foreach.hasNext ) #set($completeUri = $completeUri +"&") #end #end
+        <input name="${adatper.name}" uri="${completeUri}">
+            <attributes>
+        #addAttributes(${adatper.attributes})
+            </attributes>
+        </input>
+    #end
+    </inputs>
+
+    <outputs>
+    #foreach ($adatper in $opAdatperlist)
+        #set( $completeUri = $adatper.uri.protocol + $adatper.uri.address)
+        #if($adatper.uri.args) #set( $completeUri = $completeUri + "?") #end
+        #foreach($uriArg in ${adatper.uri.args}) #set( $completeUri = $completeUri + $uriArg.getKey()+"="+$uriArg.getValue()) #if( $foreach.hasNext ) #set($completeUri = $completeUri +"&") #end #end
+        <output name="${adatper.name}" uri="${completeUri}">
+            <attributes>
+            #addAttributes(${adatper.attributes})
+            </attributes>
+        </output>
+    #end
+    </outputs>
+
+    <steps>
+         <!-- Add the steps here and the syntax is,
+         <step name="STEP_NAME" type="STEP_TYPE">
+            <handler.class>HANDLER_CLASS_NAME</handler.class>
+            <attributes>
+                <attribute>ATTRIBUTE</attribute>
+                <attribute>ATTRIBUTE</attribute>
+                ...
+                <attribute>ATTRIBUTE</attribute>
+            </attributes>
+         </step>
+
+        supported step types and the corresponding handler class types ,
+
+    	step type        handler class type         usage
+
+        ParDo             DoFn                      core element-wise transform in apache beam, invoking a user-specified function on each of the elements of the input PCollection to produce zero or more output elements, all of which are collected into the output
+        Map               SimpleFunction            map a simple function over the elements of PCollection.
+        -->
+        <!-- Follow step is for demostration purpose, please comment out or replace with working steps  -->
+        <step name="parsing" type="ParDo">
+            <handler.class>com.ericsson.aia.bps.beam.flow.ParDoSample</handler.class>
+        </step>
+        <step name="converting" type="Map">
+            <handler.class>com.ericsson.aia.bps.beam.flow.SimpleFunctionSample</handler.class>
+        </step>
+	</steps>
+
+	<pipeline>
+	<!-- input above can be added here -->
+#foreach ($adatper in $ipAdatperlist)
+#if ($velocityCount == 1)
+		<from streams="$adatper.name" />
+#else
+		<to apply="$adatper.name" />
+#end
+#end
+<!-- steps created above can be added here to construct the pipeline-->
+        <to apply="parsing"/>
+        <to apply="converting"/>
+
+        <!-- output above can be added here -->
+#foreach ($adatper in $opAdatperlist)
+		<to apply="$adatper.name" />
+#end
+	</pipeline>
+</FlowDefinition>
+
+#macro(addAttributes $attributes)
+#foreach($attribute in ${attributes} )
+            <attribute name="${attribute.key}" value="${attribute.value}" />
+#end
+#end
